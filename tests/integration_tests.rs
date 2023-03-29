@@ -1,4 +1,5 @@
-use nom::{error::ErrorKind, error_position, AsBytes, FindSubstring, IResult, InputLength, Slice};
+use nom::Input;
+use nom::{error::ErrorKind, error_position, AsBytes, FindSubstring, IResult, InputLength};
 use nom_locate::LocatedSpan;
 use std::cmp;
 use std::fmt::Debug;
@@ -59,9 +60,9 @@ struct Position {
 fn test_str_fragments<'a, F, T>(parser: F, input: T, positions: Vec<Position>)
 where
     F: Fn(LocatedSpan<T>) -> IResult<LocatedSpan<T>, Vec<LocatedSpan<T>>>,
-    T: InputLength + Slice<Range<usize>> + Slice<RangeFull> + Debug + PartialEq + AsBytes,
+    T: InputLength + Input + Debug + PartialEq + AsBytes,
 {
-    let res = parser(LocatedSpan::new(input.slice(..)))
+    let res = parser(LocatedSpan::new(input.clone()))
         .map_err(|err| {
             eprintln!(
                 "for={:?} -- The parser should run successfully\n{:?}",
@@ -74,7 +75,7 @@ where
     // assert!(res.is_ok(), "the parser should run successfully");
     let (remaining, output) = res;
     assert!(
-        remaining.fragment().input_len() == 0,
+        Input::input_len(remaining.fragment()) == 0,
         "no input should remain"
     );
     assert_eq!(output.len(), positions.len());
@@ -83,7 +84,9 @@ where
         assert_eq!(output_item.location_line(), pos.line);
         assert_eq!(
             output_item.fragment(),
-            &input.slice(pos.offset..cmp::min(pos.offset + pos.fragment_len, input.input_len()))
+            &input.take_from(pos.offset).take(
+                cmp::min(pos.offset + pos.fragment_len, Input::input_len(&input)) - pos.offset
+            )
         );
         assert_eq!(
             output_item.get_utf8_column(),
@@ -235,8 +238,8 @@ fn find_substring<'a>(
     match input.find_substring(substr) {
         None => Err(nom::Err::Error(error_position!(input, ErrorKind::Tag))),
         Some(pos) => Ok((
-            input.slice(pos + substr_len..),
-            input.slice(pos..pos + substr_len),
+            input.take_from(pos + substr_len),
+            input.take_from(pos).take(substr_len),
         )),
     }
 }
